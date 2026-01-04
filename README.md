@@ -1,5 +1,3 @@
----
-
 # 📄 Intelligent Document Understanding (IDU) – NLP System
 
 An **end-to-end NLP application** that analyzes unstructured documents using **Machine Learning and Deep Learning models**, providing:
@@ -38,7 +36,7 @@ Below screenshots demonstrate the working Streamlit-based Intelligent Document U
 
 ![Streamlit UI](assets/streamlit_ui_1.png)
 ![Streamlit UI](assets/streamlit_ui_2.png)
-[Download Summary](assets/summary.txt)
+[See Download Summary](assets/summary.txt)
 
 
 
