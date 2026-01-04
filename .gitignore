@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environment
+venv/
+.env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Models (large files)
+models/*.bin
+models/*.pt
+models/*.safetensors
+
+# Data (if large / raw)
+data/*.zip
+data/*.tar
+data/*.gz
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Streamlit
+.streamlit/
+
+# Logs
+*.log
