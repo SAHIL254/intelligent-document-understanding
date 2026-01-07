@@ -15,7 +15,7 @@ st.set_page_config(
 st.title("📄 Intelligent Document Understanding (IDU)")
 st.write("Analyze documents using NLP: **Classification, NER & Summarization**")
 
-API_URL = "http://127.0.0.1:8000/predict"
+API_URL = "http://127.0.0.1:8000/predict"       
 
 # ----------------------------
 # Helper: Clean text
