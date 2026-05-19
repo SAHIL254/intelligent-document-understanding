@@ -125,3 +125,4 @@ weasel==0.4.3
 wrapt==2.0.1
 xxhash==3.6.0
 yarl==1.22.0
+rouge_score==0.1.2

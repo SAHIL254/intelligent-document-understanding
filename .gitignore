@@ -30,3 +30,12 @@ Thumbs.db
 
 # Logs
 *.log
+
+test_components.py
+
+bbc_summaries.csv
+bbc_with_entities.csv
+processed_bbc.csv
+summarization_evaluation.json
+
+t5_summarizer
