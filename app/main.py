@@ -1,347 +1,547 @@
 """
-FastAPI Integration
-===================
+FastAPI Backend for NLP IDU Project
+====================================
+Provides REST API endpoints for document analysis using the NLP IDU pipeline.
 
-Production-ready FastAPI server for NLP pipeline.
+Start with: uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from typing import Optional, List
-from enum import Enum
-import sys
-import os
+from typing import List, Dict, Optional, Literal
+import logging
+from datetime import datetime
+import joblib
+import spacy
 
-# Add current directory to path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from src.logger import get_logger
+from src.pipeline import NLPInferencePipeline, PredictionPipeline
+from src.components import TextSummarizer
+from src.exceptions import NLPException
 
-from src.pipeline import InferencePipeline
-from src.pipeline.inference_pipeline import PipelineConfig, TaskType
-from src.logger import get_logger, setup_logging
-from src.exceptions import NLPPipelineException
+# ============================================================================
+# LOGGING
+# ============================================================================
 
-# Setup logging
-setup_logging("nlp_pipeline_api")
-logger = get_logger("nlp_pipeline_api")
+logger = get_logger(__name__)
 
-# Initialize FastAPI app
+# ============================================================================
+# FASTAPI APP
+# ============================================================================
+
 app = FastAPI(
-    title="NLP Pipeline API",
-    description="Production NLP pipeline with classification, NER, and summarization",
-    version="1.0.0"
+    title="NLP IDU API",
+    description="Intelligent Document Understanding - NLP Pipeline API",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc"
 )
 
-# Initialize pipeline with error handling
-try:
-    logger.info("Initializing InferencePipeline...")
-    pipeline = InferencePipeline(
-        config=PipelineConfig(
-            # Update with your actual model paths
-            classifier_model_path=None,
-            classifier_vectorizer_path=None,
-            ner_model_name="en_core_web_sm",
-            summarizer_model_name="t5-small"
-        )
+# ============================================================================
+# CORS CONFIGURATION
+# ============================================================================
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins (modify for production)
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ============================================================================
+# PYDANTIC MODELS
+# ============================================================================
+
+class AnalysisRequest(BaseModel):
+    """Request model for document analysis."""
+    
+    text: str = Field(
+        ...,
+        min_length=20,
+        max_length=50000,
+        description="Document text to analyze"
     )
-    logger.info("InferencePipeline initialized successfully")
-except Exception as e:
-    logger.error(f"Failed to initialize pipeline: {e}", exc_info=True)
-    logger.warning("Pipeline will be unavailable. Check model paths and dependencies.")
-    pipeline = None
+    
+    task: Literal[
+        "full_pipeline",
+        "classification",
+        "named_entity_recognition",
+        "summarization"
+    ] = Field(
+        default="full_pipeline",
+        description="Type of analysis to perform"
+    )
 
 
-# Pydantic models for request/response
-class TaskEnum(str, Enum):
-    """Task types."""
-    CLASSIFICATION = "classification"
-    NER = "named_entity_recognition"
-    SUMMARIZATION = "summarization"
-    FULL = "full_pipeline"
+class Entity(BaseModel):
+    """Model for named entity."""
+    text: str
+    label: str
+    start: Optional[int] = None
+    end: Optional[int] = None
 
 
-class TextInput(BaseModel):
-    """Input model for text processing."""
-    text: str = Field(..., min_length=20, max_length=10000, description="Input text")
-    task: TaskEnum = Field(default=TaskEnum.FULL, description="Task type")
+class EntitySummary(BaseModel):
+    """Summary of entities by type."""
+    entity_type: str
+    count: int
+    examples: List[str]
 
 
-class ClassificationRequest(BaseModel):
-    """Classification request model."""
-    text: str = Field(..., min_length=20, description="Text to classify")
+class AnalysisResponse(BaseModel):
+    """Response model for document analysis."""
+    
+    success: bool = True
+    message: str = "Analysis completed successfully"
+    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
+    
+    # Analysis Results
+    data: Dict = Field(
+        default_factory=dict,
+        description="Analysis results"
+    )
+    
+    # Individual fields for easier access
+    category: Optional[str] = None
+    entities: Optional[List[Entity]] = None
+    entity_summary: Optional[Dict[str, int]] = None
+    summary: Optional[str] = None
+    
+    # Metadata
+    text_length: int = 0
+    word_count: int = 0
 
 
-class SummarizationRequest(BaseModel):
-    """Summarization request model."""
-    text: str = Field(..., min_length=20, description="Text to summarize")
-    max_length: int = Field(default=130, ge=30, le=300, description="Max summary length")
-
-
-class NERRequest(BaseModel):
-    """NER request model."""
-    text: str = Field(..., min_length=20, description="Text for NER")
-
-
-class BatchProcessRequest(BaseModel):
-    """Batch processing request."""
-    texts: List[str] = Field(..., description="List of texts to process")
-    task: TaskEnum = Field(default=TaskEnum.FULL, description="Task type")
-
-
-class Response(BaseModel):
-    """Standard response model."""
+class HealthResponse(BaseModel):
+    """Health check response."""
     status: str
-    data: dict
-    message: Optional[str] = None
+    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
+    version: str = "1.0.0"
+    models_loaded: bool = False
 
 
-# Health check endpoint
-@app.get("/health")
+class ErrorResponse(BaseModel):
+    """Error response model."""
+    success: bool = False
+    error: str
+    message: str
+    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
+
+
+# ============================================================================
+# GLOBAL STATE - MODEL INITIALIZATION
+# ============================================================================
+
+class ModelManager:
+    """Manages model loading and lifecycle."""
+    
+    def __init__(self):
+        self.inference_pipeline = None
+        self.prediction_pipeline = None
+        self.is_loaded = False
+        self.load_error = None
+    
+    def load_models(self):
+        """Load all required models."""
+        try:
+            logger.info("Loading NLP IDU models...")
+            
+            # Try to load inference pipeline
+            try:
+                self.inference_pipeline = NLPInferencePipeline(
+                    classifier_path="models/text_classifier.pkl",
+                    vectorizer_path="models/tfidf_vectorizer.pkl",
+                    ner_model="en_core_web_sm",
+                    summarizer_model="t5-small"
+                )
+                logger.info("✓ Inference pipeline loaded")
+            except FileNotFoundError as e:
+                logger.warning(f"Inference pipeline models not found: {e}")
+                logger.info("Will use fallback models...")
+                
+                # Fallback: load individual components
+                try:
+                    nlp = spacy.load("en_core_web_sm")
+                    summarizer = TextSummarizer("t5-small")
+                    
+                    self.prediction_pipeline = PredictionPipeline(
+                        classifier_model=None,
+                        vectorizer=None,
+                        nlp_model=nlp,
+                        summarizer=summarizer
+                    )
+                    logger.info("✓ Fallback models loaded (NER + Summarization)")
+                except Exception as fallback_error:
+                    logger.error(f"Fallback loading failed: {fallback_error}")
+                    self.load_error = str(fallback_error)
+                    return False
+            
+            self.is_loaded = True
+            logger.info("✓ All models loaded successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error loading models: {e}")
+            self.load_error = str(e)
+            return False
+
+
+# Global model manager instance
+model_manager = ModelManager()
+
+
+# ============================================================================
+# STARTUP & SHUTDOWN EVENTS
+# ============================================================================
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize models on startup."""
+    logger.info("🚀 FastAPI server starting...")
+    model_manager.load_models()
+    if model_manager.is_loaded:
+        logger.info("✅ Server ready for requests")
+    else:
+        logger.warning("⚠️ Server started but models failed to load")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup on shutdown."""
+    logger.info("🛑 FastAPI server shutting down...")
+
+
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+def get_text_statistics(text: str) -> Dict:
+    """Calculate text statistics."""
+    words = text.split()
+    sentences = [s for s in text.split(".") if s.strip()]
+    
+    return {
+        "text_length": len(text),
+        "word_count": len(words),
+        "sentence_count": len(sentences),
+        "avg_word_length": round(len(text) / len(words), 2) if words else 0
+    }
+
+
+def format_entities(entities: List[Dict]) -> tuple:
+    """Format entities for response.
+    
+    Returns:
+        Tuple of (entities_list, entity_summary_dict)
+    """
+    if not entities:
+        return [], {}
+    
+    # Convert to Entity objects if needed
+    formatted_entities = []
+    entity_summary = {}
+    
+    for ent in entities:
+        if isinstance(ent, dict):
+            formatted_entities.append(Entity(**ent))
+            
+            # Count by label
+            label = ent.get("label", "UNKNOWN")
+            entity_summary[label] = entity_summary.get(label, 0) + 1
+        else:
+            # Handle tuple format (text, label)
+            if isinstance(ent, (tuple, list)) and len(ent) >= 2:
+                formatted_entities.append(Entity(text=ent[0], label=ent[1]))
+                entity_summary[ent[1]] = entity_summary.get(ent[1], 0) + 1
+    
+    return formatted_entities, entity_summary
+
+
+# ============================================================================
+# HEALTH CHECK ENDPOINT
+# ============================================================================
+
+@app.get("/health", response_model=HealthResponse)
 async def health_check():
-    """Check pipeline health status."""
-    if pipeline is None:
-        logger.warning("Health check requested but pipeline not initialized")
-        return {
-            "status": "degraded",
-            "message": "Pipeline not fully initialized",
-            "components": {
-                "classifier_ready": False,
-                "ner_ready": False,
-                "summarizer_ready": False
-            }
-        }
-    
-    try:
-        status = pipeline.get_system_status()
-        return {
-            "status": "healthy",
-            "components": status
-        }
-    except Exception as e:
-        logger.error(f"Health check failed: {e}")
-        return {
-            "status": "unhealthy",
-            "error": str(e)
-        }
+    """Check API health and model status."""
+    return HealthResponse(
+        status="operational" if model_manager.is_loaded else "degraded",
+        models_loaded=model_manager.is_loaded
+    )
 
 
-# Classification endpoint
-@app.post("/classify", response_model=Response)
-async def classify(request: ClassificationRequest):
+# ============================================================================
+# MAIN ANALYSIS ENDPOINT
+# ============================================================================
+
+@app.post("/analyze", response_model=AnalysisResponse)
+async def analyze_document(request: AnalysisRequest):
     """
-    Classify input text.
+    Analyze document using NLP IDU pipeline.
     
-    - **text**: Input text (min 20 chars)
-    - Returns: Predicted category
+    Parameters:
+    -----------
+    - text: Document text to analyze
+    - task: Type of analysis (full_pipeline, classification, ner, summarization)
+    
+    Returns:
+    --------
+    - Analysis results including classification, entities, and summary
     """
-    if pipeline is None:
-        logger.error("Classification request but pipeline not initialized")
-        raise HTTPException(
-            status_code=503,
-            detail="Pipeline not available. Check logs for initialization errors."
-        )
-    
     try:
-        logger.debug(f"Classification request received")
-        result = pipeline.classify(request.text)
-        logger.info("Classification completed successfully")
-        return Response(
-            status="success",
-            data=result,
-            message="Classification completed"
+        logger.info(f"Analyzing document (task={request.task}, len={len(request.text)})")
+        
+        # Validate input
+        if not request.text or len(request.text.strip()) < 20:
+            raise ValueError("Text must be at least 20 characters")
+        
+        # Get text statistics
+        stats = get_text_statistics(request.text)
+        
+        # Initialize response
+        response_data = {
+            "category": None,
+            "entities": [],
+            "entity_summary": {},
+            "summary": None
+        }
+        
+        # =====================================================================
+        # FULL PIPELINE
+        # =====================================================================
+        if request.task == "full_pipeline":
+            
+            if model_manager.inference_pipeline:
+                logger.info("Using inference pipeline for full analysis")
+                
+                result = model_manager.inference_pipeline.process_document(
+                    request.text
+                )
+                
+                response_data["category"] = result.get("category")
+                response_data["entities"] = result.get("entities", [])
+                response_data["summary"] = result.get("summary")
+                
+            else:
+                logger.warning("Inference pipeline not available, using fallback")
+                
+                # Fallback: Do NER + Summarization
+                if model_manager.prediction_pipeline:
+                    result = model_manager.prediction_pipeline.predict(
+                        request.text,
+                        tasks=["ner", "summarization"]
+                    )
+                    
+                    response_data["entities"] = result.get("entities", [])
+                    response_data["summary"] = result.get("summary")
+                else:
+                    raise NLPException("No models available for analysis")
+        
+        # =====================================================================
+        # CLASSIFICATION ONLY
+        # =====================================================================
+        elif request.task == "classification":
+            
+            if model_manager.inference_pipeline:
+                result = model_manager.inference_pipeline.process_document(
+                    request.text
+                )
+                response_data["category"] = result.get("category")
+            else:
+                logger.warning("Classification model not available")
+                response_data["category"] = "Unknown (Model not loaded)"
+        
+        # =====================================================================
+        # NER ONLY
+        # =====================================================================
+        elif request.task == "named_entity_recognition":
+            
+            if model_manager.prediction_pipeline:
+                result = model_manager.prediction_pipeline.predict(
+                    request.text,
+                    tasks=["ner"]
+                )
+                response_data["entities"] = result.get("entities", [])
+            else:
+                raise NLPException("NER model not loaded")
+        
+        # =====================================================================
+        # SUMMARIZATION ONLY
+        # =====================================================================
+        elif request.task == "summarization":
+            
+            if model_manager.prediction_pipeline:
+                result = model_manager.prediction_pipeline.predict(
+                    request.text,
+                    tasks=["summarization"]
+                )
+                response_data["summary"] = result.get("summary")
+            else:
+                raise NLPException("Summarizer model not loaded")
+        
+        # =====================================================================
+        # FORMAT RESPONSE
+        # =====================================================================
+        
+        # Format entities
+        entities, entity_summary = format_entities(
+            response_data.get("entities", [])
         )
-    except NLPPipelineException as e:
-        logger.warning(f"Classification validation error: {e}")
+        
+        response_data["entities"] = [e.dict() for e in entities]
+        response_data["entity_summary"] = entity_summary
+        
+        # Build response
+        return AnalysisResponse(
+            success=True,
+            message="Analysis completed successfully",
+            data=response_data,
+            category=response_data.get("category"),
+            entities=entities,
+            entity_summary=entity_summary,
+            summary=response_data.get("summary"),
+            text_length=stats["text_length"],
+            word_count=stats["word_count"]
+        )
+        
+    except ValueError as e:
+        logger.warning(f"Validation error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
+    
+    except NLPException as e:
+        logger.error(f"NLP error: {e}")
+        raise HTTPException(status_code=503, detail=str(e))
+    
     except Exception as e:
-        logger.error(f"Classification error: {e}", exc_info=True)
+        logger.error(f"Unexpected error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-# NER endpoint
-@app.post("/extract-entities", response_model=Response)
-async def extract_entities(request: NERRequest):
+# ============================================================================
+# BATCH ANALYSIS ENDPOINT
+# ============================================================================
+
+@app.post("/analyze-batch")
+async def analyze_batch(
+    documents: List[Dict[str, str]],
+    task: str = "full_pipeline"
+):
     """
-    Extract named entities from text.
+    Analyze multiple documents in batch.
     
-    - **text**: Input text (min 20 chars)
-    - Returns: List of entities with labels
+    Parameters:
+    -----------
+    - documents: List of dicts with 'text' and optional 'id'
+    - task: Type of analysis
+    
+    Returns:
+    --------
+    - List of analysis results
     """
-    if pipeline is None:
-        logger.error("NER request but pipeline not initialized")
-        raise HTTPException(
-            status_code=503,
-            detail="Pipeline not available. Check logs for initialization errors."
-        )
-    
     try:
-        logger.debug(f"NER request received")
-        result = pipeline.extract_entities(request.text)
-        logger.info("Entity extraction completed successfully")
-        return Response(
-            status="success",
-            data=result,
-            message="Entity extraction completed"
-        )
-    except NLPPipelineException as e:
-        logger.warning(f"NER validation error: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"NER error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-
-# Summarization endpoint
-@app.post("/summarize", response_model=Response)
-async def summarize(request: SummarizationRequest):
-    """
-    Generate text summary.
-    
-    - **text**: Input text (min 20 chars)
-    - **max_length**: Maximum summary length (30-300)
-    - Returns: Generated summary
-    """
-    if pipeline is None:
-        logger.error("Summarization request but pipeline not initialized")
-        raise HTTPException(
-            status_code=503,
-            detail="Pipeline not available. Check logs for initialization errors."
-        )
-    
-    try:
-        logger.debug(f"Summarization request received")
-        result = pipeline.summarize(request.text, max_length=request.max_length)
-        logger.info("Summarization completed successfully")
-        return Response(
-            status="success",
-            data=result,
-            message="Summarization completed"
-        )
-    except NLPPipelineException as e:
-        logger.warning(f"Summarization validation error: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"Summarization error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-
-# Full analysis endpoint
-@app.post("/analyze", response_model=Response)
-async def full_analysis(request: TextInput):
-    """
-    Perform complete document analysis.
-    
-    - **text**: Input text
-    - **task**: Task type (classification, ner, summarization, full_pipeline)
-    - Returns: Results from specified task(s)
-    """
-    if pipeline is None:
-        logger.error("Analysis request but pipeline not initialized")
-        raise HTTPException(
-            status_code=503,
-            detail="Pipeline not available. Check logs for initialization errors."
-        )
-    
-    try:
-        logger.debug(f"Analysis request received for task: {request.task.value}")
+        if not documents or len(documents) > 100:
+            raise ValueError("Provide 1-100 documents")
         
-        # Map string to TaskType enum
-        task_map = {
-            "classification": TaskType.CLASSIFICATION,
-            "named_entity_recognition": TaskType.NER,
-            "summarization": TaskType.SUMMARIZATION,
-            "full_pipeline": TaskType.FULL
-        }
+        results = []
         
-        task_type = task_map.get(request.task.value, TaskType.FULL)
-        result = pipeline.process(request.text, task=task_type)
-        
-        logger.info(f"Analysis completed for task: {request.task.value}")
-        
-        return Response(
-            status="success",
-            data=result,
-            message=f"Analysis completed with task: {request.task.value}"
-        )
-    except NLPPipelineException as e:
-        logger.warning(f"Analysis validation error: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"Analysis error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-
-# Batch processing endpoint
-@app.post("/batch-analyze", response_model=dict)
-async def batch_analyze(request: BatchProcessRequest):
-    """
-    Process multiple texts.
-    
-    - **texts**: List of texts to process
-    - **task**: Task type
-    - Returns: Results for each text
-    """
-    if pipeline is None:
-        logger.error("Batch processing request but pipeline not initialized")
-        raise HTTPException(
-            status_code=503,
-            detail="Pipeline not available. Check logs for initialization errors."
-        )
-    
-    try:
-        logger.debug(f"Batch processing request received for {len(request.texts)} texts")
-        
-        task_map = {
-            "classification": TaskType.CLASSIFICATION,
-            "named_entity_recognition": TaskType.NER,
-            "summarization": TaskType.SUMMARIZATION,
-            "full_pipeline": TaskType.FULL
-        }
-        
-        task_type = task_map.get(request.task.value, TaskType.FULL)
-        results = pipeline.batch_process(request.texts, task=task_type)
-        
-        logger.info(f"Batch processing completed for {len(results)} texts")
+        for doc in documents:
+            request = AnalysisRequest(text=doc.get("text", ""), task=task)
+            result = await analyze_document(request)
+            
+            result_dict = result.dict()
+            if "id" in doc:
+                result_dict["id"] = doc["id"]
+            
+            results.append(result_dict)
         
         return {
-            "status": "success",
+            "success": True,
             "count": len(results),
-            "results": results,
-            "message": f"Batch processing completed for {len(results)} texts"
+            "results": results
         }
-    except NLPPipelineException as e:
-        logger.warning(f"Batch processing validation error: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        
     except Exception as e:
-        logger.error(f"Batch processing error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error")
+        logger.error(f"Batch analysis error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-# Root endpoint
+# ============================================================================
+# MODEL STATUS ENDPOINT
+# ============================================================================
+
+@app.get("/models/status")
+async def model_status():
+    """Get status of loaded models."""
+    return {
+        "inference_pipeline_loaded": model_manager.inference_pipeline is not None,
+        "prediction_pipeline_loaded": model_manager.prediction_pipeline is not None,
+        "models_ready": model_manager.is_loaded,
+        "load_error": model_manager.load_error,
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+# ============================================================================
+# ROOT ENDPOINT
+# ============================================================================
+
 @app.get("/")
 async def root():
-    """Root endpoint with API info."""
+    """API root endpoint."""
     return {
-        "name": "NLP Pipeline API",
+        "name": "NLP IDU API",
         "version": "1.0.0",
+        "status": "running",
+        "docs": "/docs",
+        "health": "/health",
         "endpoints": {
-            "health": "/health",
-            "classify": "/classify",
-            "extract_entities": "/extract-entities",
-            "summarize": "/summarize",
-            "full_analysis": "/analyze",
-            "batch_processing": "/batch-analyze",
-            "docs": "/docs"
+            "POST /analyze": "Analyze single document",
+            "POST /analyze-batch": "Analyze multiple documents",
+            "GET /health": "Health check",
+            "GET /models/status": "Model status"
         }
     }
 
 
+# ============================================================================
+# ERROR HANDLERS
+# ============================================================================
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request, exc):
+    """Handle HTTP exceptions."""
+    return {
+        "success": False,
+        "error": exc.detail,
+        "status_code": exc.status_code,
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request, exc):
+    """Handle general exceptions."""
+    logger.error(f"Unhandled exception: {exc}")
+    return {
+        "success": False,
+        "error": "Internal server error",
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+# ============================================================================
+# IF RUN DIRECTLY
+# ============================================================================
+
 if __name__ == "__main__":
     import uvicorn
     
-    # Run with: python -m uvicorn app.main:app --reload
     uvicorn.run(
-        app,
+        "app.main:app",
         host="0.0.0.0",
         port=8000,
+        reload=True,
         log_level="info"
     )

@@ -1,16 +1,24 @@
 """
 Components Module
 =================
-
-Core NLP components for text processing and model inference.
+Modular components for NLP IDU pipeline.
 """
 
-from .classifier import TextClassifier
-from .ner import NamedEntityRecognizer
-from .summarizer import TextSummarizer
+from src.components.data_ingestion import DataIngestion
+from src.components.data_transformation import DataTransformation
+from src.components.feature_engineering import FeatureEngineering
+from src.components.model_trainer import ModelTrainer, NERTrainer
+from src.components.model_evaluation import ModelEvaluation, NEREvaluation
+from src.components.summarizer import TextSummarizer, SummarizationPipeline
 
 __all__ = [
-    "TextClassifier",
-    "NamedEntityRecognizer", 
-    "TextSummarizer",
+    'DataIngestion',
+    'DataTransformation',
+    'FeatureEngineering',
+    'ModelTrainer',
+    'NERTrainer',
+    'ModelEvaluation',
+    'NEREvaluation',
+    'TextSummarizer',
+    'SummarizationPipeline',
 ]

@@ -1,238 +1,233 @@
 """
-Utility Functions
-=================
-
-Helper functions for the NLP pipeline.
+Utility Functions and Constants for NLP IDU Project
+====================================================
+Provides helper functions and project-wide constants.
 """
 
-import json
-from typing import Any, Dict, List
+import os
 from pathlib import Path
-import logging
+from typing import List, Dict, Any
+import json
+import pickle
 
 
-logger = logging.getLogger(__name__)
+# ============================================================================
+# PATHS & DIRECTORIES
+# ============================================================================
+
+PROJECT_ROOT = Path(__file__).parent.parent
+DATA_DIR = PROJECT_ROOT / "data"
+MODELS_DIR = PROJECT_ROOT / "models"
+LOGS_DIR = PROJECT_ROOT / "logs"
+ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
+
+# Create directories if they don't exist
+for directory in [DATA_DIR, MODELS_DIR, LOGS_DIR, ARTIFACTS_DIR]:
+    directory.mkdir(parents=True, exist_ok=True)
 
 
-def setup_logging(level=logging.INFO):
+# ============================================================================
+# MODEL CONFIGURATIONS
+# ============================================================================
+
+MODEL_CONFIGS = {
+    "text_classification": {
+        "vectorizer_model": "tfidf",
+        "classifier_model": "logistic_regression",
+        "max_features": 5000,
+        "ngram_range": (1, 2),
+        "min_df": 5,
+        "max_df": 0.7,
+        "test_size": 0.2,
+        "random_state": 42,
+    },
+    "ner": {
+        "model_name": "en_core_web_sm",
+        "entity_types": ["PERSON", "ORG", "GPE", "DATE", "MONEY", "PRODUCT"],
+    },
+    "summarization": {
+        "transformer_model": "t5-small",
+        "max_input_length": 512,
+        "max_summary_length": 130,
+        "min_summary_length": 40,
+        "num_beams": 4,
+        "device": "cpu",
+    },
+}
+
+
+# ============================================================================
+# TEXT PREPROCESSING CONSTANTS
+# ============================================================================
+
+STOPWORDS_EN = {
+    "i", "me", "my", "myself", "we", "our", "ours", "ourselves", "you", "your",
+    "yours", "yourself", "yourselves", "he", "him", "his", "himself", "she",
+    "her", "hers", "herself", "it", "its", "itself", "they", "them", "their",
+    "theirs", "themselves", "what", "which", "who", "whom", "this", "that",
+    "these", "those", "am", "is", "are", "was", "were", "be", "been", "being",
+    "have", "has", "had", "having", "do", "does", "did", "doing", "a", "an",
+    "the", "and", "but", "if", "or", "because", "as", "until", "while", "of",
+    "at", "by", "for", "with", "about", "against", "between", "into", "through",
+    "during", "before", "after", "above", "below", "to", "from", "up", "down",
+    "in", "out", "on", "off", "over", "under", "again", "further", "then", "once"
+}
+
+# Special characters to remove during preprocessing
+SPECIAL_CHARS = r'[^a-zA-Z0-9\s]'
+
+
+# ============================================================================
+# FILE I/O UTILITIES
+# ============================================================================
+
+def save_json(data: Dict[str, Any], filepath: str) -> None:
     """
-    Configure logging for the application.
+    Save dictionary as JSON file.
     
     Args:
-        level: Logging level
+        data (dict): Data to save
+        filepath (str): Output file path
     """
-    logging.basicConfig(
-        level=level,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
+    Path(filepath).parent.mkdir(parents=True, exist_ok=True)
+    with open(filepath, 'w') as f:
+        json.dump(data, f, indent=4)
 
 
-def save_results_to_json(results: Dict[str, Any], filepath: str) -> None:
+def load_json(filepath: str) -> Dict[str, Any]:
     """
-    Save pipeline results to JSON file.
+    Load JSON file as dictionary.
     
     Args:
-        results: Results dictionary
-        filepath: Path to save file
-    """
-    try:
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(results, f, indent=2, ensure_ascii=False)
-        logger.info(f"Results saved to {filepath}")
-    except Exception as e:
-        logger.error(f"Failed to save results: {e}")
-
-
-def load_results_from_json(filepath: str) -> Dict[str, Any]:
-    """
-    Load pipeline results from JSON file.
-    
-    Args:
-        filepath: Path to results file
+        filepath (str): Input file path
         
     Returns:
-        Results dictionary
+        dict: Loaded data
     """
-    try:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            results = json.load(f)
-        logger.info(f"Results loaded from {filepath}")
-        return results
-    except Exception as e:
-        logger.error(f"Failed to load results: {e}")
-        return {}
+    with open(filepath, 'r') as f:
+        return json.load(f)
 
 
-def read_text_file(filepath: str) -> str:
+def save_pickle(obj: Any, filepath: str) -> None:
     """
-    Read text from file.
+    Save Python object as pickle file.
     
     Args:
-        filepath: Path to text file
-        
-    Returns:
-        File content as string
+        obj: Object to save
+        filepath (str): Output file path
     """
-    try:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            content = f.read()
-        return content
-    except Exception as e:
-        logger.error(f"Failed to read file: {e}")
-        return ""
+    Path(filepath).parent.mkdir(parents=True, exist_ok=True)
+    with open(filepath, 'wb') as f:
+        pickle.dump(obj, f)
 
 
-def batch_read_text_files(directory: str, pattern: str = "*.txt") -> Dict[str, str]:
+def load_pickle(filepath: str) -> Any:
     """
-    Read multiple text files from directory.
+    Load Python object from pickle file.
     
     Args:
-        directory: Directory path
-        pattern: File pattern (default: *.txt)
+        filepath (str): Input file path
         
     Returns:
-        Dictionary with filenames as keys and contents as values
+        Object loaded from pickle
     """
-    results = {}
-    try:
-        path = Path(directory)
-        for filepath in path.glob(pattern):
-            content = read_text_file(str(filepath))
-            results[filepath.name] = content
-        logger.info(f"Loaded {len(results)} files from {directory}")
-    except Exception as e:
-        logger.error(f"Failed to read files: {e}")
-    
-    return results
+    with open(filepath, 'rb') as f:
+        return pickle.load(f)
 
 
-def truncate_text(text: str, max_length: int = 500, suffix: str = "...") -> str:
+# ============================================================================
+# TEXT UTILITIES
+# ============================================================================
+
+def validate_text_input(text: str, min_length: int = 20) -> bool:
     """
-    Truncate text to maximum length.
+    Validate if input text meets minimum requirements.
     
     Args:
-        text: Input text
-        max_length: Maximum length
-        suffix: Suffix for truncated text
+        text (str): Input text to validate
+        min_length (int): Minimum text length required
         
     Returns:
-        Truncated text
+        bool: True if valid, False otherwise
     """
-    if len(text) <= max_length:
-        return text
-    
-    return text[:max_length - len(suffix)] + suffix
+    if not text or len(text.strip()) < min_length:
+        return False
+    return True
 
 
-def format_entities_table(entities: List[Dict[str, Any]]) -> str:
+def get_text_statistics(text: str) -> Dict[str, int]:
     """
-    Format entities as table string.
+    Calculate statistics about input text.
     
     Args:
-        entities: List of entity dictionaries
+        text (str): Input text
         
     Returns:
-        Formatted table string
-    """
-    if not entities:
-        return "No entities found."
-    
-    from tabulate import tabulate
-    
-    headers = ["Text", "Label"]
-    rows = [[e.get("text"), e.get("label")] for e in entities]
-    
-    return tabulate(rows, headers=headers, tablefmt="grid")
-
-
-def calculate_processing_time(start_time: float, end_time: float) -> float:
-    """
-    Calculate processing time in seconds.
-    
-    Args:
-        start_time: Start timestamp
-        end_time: End timestamp
-        
-    Returns:
-        Processing time in seconds
-    """
-    return round(end_time - start_time, 4)
-
-
-def get_text_statistics(text: str) -> Dict[str, Any]:
-    """
-    Calculate text statistics.
-    
-    Args:
-        text: Input text
-        
-    Returns:
-        Dictionary with statistics
+        dict: Dictionary with word count, char count, sentence count
     """
     words = text.split()
     sentences = text.split('.')
     
     return {
-        "character_count": len(text),
+        "char_count": len(text),
         "word_count": len(words),
         "sentence_count": len([s for s in sentences if s.strip()]),
-        "average_word_length": round(
-            len(text) / len(words) if words else 0,
-            2
-        ),
-        "average_sentence_length": round(
-            len(words) / len([s for s in sentences if s.strip()]) 
-            if sentences else 0,
-            2
-        )
+        "avg_word_length": sum(len(w) for w in words) / len(words) if words else 0,
     }
 
 
-class Timer:
-    """Context manager for timing code blocks."""
-    
-    def __init__(self, name: str = "Operation"):
-        """
-        Initialize timer.
-        
-        Args:
-            name: Name of operation
-        """
-        self.name = name
-        self.start_time = None
-        self.end_time = None
-    
-    def __enter__(self):
-        """Start timer."""
-        import time
-        self.start_time = time.time()
-        return self
-    
-    def __exit__(self, *args):
-        """Stop timer and log result."""
-        import time
-        self.end_time = time.time()
-        elapsed = self.end_time - self.start_time
-        logger.info(f"{self.name} completed in {elapsed:.4f}s")
+# ============================================================================
+# DATA UTILITIES
+# ============================================================================
 
-
-def validate_model_paths(model_path: str, vectorizer_path: str) -> bool:
+def ensure_dataframe(data):
     """
-    Validate that model files exist.
+    Ensure data is in pandas DataFrame format.
     
     Args:
-        model_path: Path to model file
-        vectorizer_path: Path to vectorizer file
+        data: Input data (list, dict, or DataFrame)
         
     Returns:
-        True if both files exist
+        DataFrame: Data in DataFrame format
     """
-    model_exists = Path(model_path).exists()
-    vectorizer_exists = Path(vectorizer_path).exists()
+    import pandas as pd
     
-    if not model_exists:
-        logger.warning(f"Model file not found: {model_path}")
-    if not vectorizer_exists:
-        logger.warning(f"Vectorizer file not found: {vectorizer_path}")
+    if isinstance(data, pd.DataFrame):
+        return data
+    elif isinstance(data, list):
+        return pd.DataFrame(data)
+    elif isinstance(data, dict):
+        return pd.DataFrame([data])
+    else:
+        raise ValueError(f"Unsupported data type: {type(data)}")
+
+
+# ============================================================================
+# MODEL UTILITIES
+# ============================================================================
+
+def get_model_path(model_name: str) -> str:
+    """
+    Get full path to saved model file.
     
-    return model_exists and vectorizer_exists
+    Args:
+        model_name (str): Name of the model
+        
+    Returns:
+        str: Full path to model file
+    """
+    return str(MODELS_DIR / f"{model_name}.pkl")
+
+
+def get_artifact_path(artifact_name: str, extension: str = "json") -> str:
+    """
+    Get full path to artifact file.
+    
+    Args:
+        artifact_name (str): Name of the artifact
+        extension (str): File extension
+        
+    Returns:
+        str: Full path to artifact file
+    """
+    return str(ARTIFACTS_DIR / f"{artifact_name}.{extension}")

@@ -31,7 +31,6 @@ Thumbs.db
 # Logs
 *.log
 
-test_components.py
 
 bbc_summaries.csv
 bbc_with_entities.csv

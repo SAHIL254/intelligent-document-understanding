@@ -1,14 +1,15 @@
 """
 Pipeline Module
 ===============
-
-End-to-end NLP processing pipelines for document analysis.
+Orchestration and workflow management.
 """
 
-from .nlp_pipeline import NLPPipeline
-from .inference_pipeline import InferencePipeline
+from src.pipeline.training_pipeline import TrainingPipeline, NLPInferencePipeline
+from src.pipeline.prediction_pipeline import PredictionPipeline, FastAPIEndpoint
 
 __all__ = [
-    "NLPPipeline",
-    "InferencePipeline",
+    'TrainingPipeline',
+    'NLPInferencePipeline',
+    'PredictionPipeline',
+    'FastAPIEndpoint',
 ]

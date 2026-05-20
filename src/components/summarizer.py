@@ -1,84 +1,54 @@
 """
 Text Summarization Component
-============================
-
-Handles abstractive summarization using transformer models.
+=============================
+Handles transformer-based text summarization.
+Extracted from: 05_text_summarization.ipynb
 """
 
 import torch
-from typing import Optional
-
-from transformers import (
-    AutoTokenizer,
-    AutoModelForSeq2SeqLM
-)
-
-from src.logger import LoggerMixin
-from src.exceptions import (
-    ModelLoadingError,
-    ValidationError,
-    SummarizationError
-)
+from typing import Dict, Optional
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+from src.logger import get_logger
+from src.exceptions import ModelTrainingError
+from src.utils import MODEL_CONFIGS
 
 
-class TextSummarizer(LoggerMixin):
+logger = get_logger(__name__)
+
+
+class TextSummarizer:
     """
-    Text summarization component using T5 or similar seq2seq models.
-    
-    Attributes:
-        model_name: Name of the transformer model
-        tokenizer: Hugging Face tokenizer
-        model: Sequence-to-sequence model
-        device: CPU or GPU device
+    Handles text summarization using pre-trained T5 transformer models.
     """
     
-    def __init__(
-        self,
-        model_name: str = "t5-small",
-        device: Optional[str] = None
-    ):
+    def __init__(self, model_name: str = "t5-small", device: str = "cpu"):
         """
-        Initialize TextSummarizer.
+        Initialize text summarizer with T5 model.
         
         Args:
-            model_name: Name of the pre-trained model from Hugging Face
-            device: Device to use ('cuda' or 'cpu'). Auto-detected if None.
+            model_name (str): Name of T5 model to load
+            device (str): Device to run model on ("cpu" or "cuda")
+            
+        Raises:
+            ModelTrainingError: If model loading fails
         """
-        self.setup_logger()
-        
         self.model_name = model_name
+        self.device = torch.device(device)
         self.tokenizer = None
         self.model = None
-        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.is_loaded = False
         
-        self.log_info(f"Using device: {self.device}")
-        self.load_model()
-    
-    def load_model(self) -> None:
-        """
-        Load tokenizer and model from Hugging Face.
-        
-        Raises:
-            ModelLoadingError: If model loading fails
-        """
         try:
-            self.log_info(f"Loading tokenizer for '{self.model_name}'")
-            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-            
-            self.log_info(f"Loading model '{self.model_name}'")
-            self.model = AutoModelForSeq2SeqLM.from_pretrained(self.model_name)
-            
+            logger.info(f"Loading summarization model: {model_name}")
+            self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+            self.model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
             self.model.to(self.device)
             self.model.eval()
-            
-            self.log_info(f"Summarization model '{self.model_name}' loaded on {self.device}")
+            self.is_loaded = True
+            logger.info(f"Summarization model loaded successfully on {device}")
         except Exception as e:
-            self.log_error(f"Failed to load model: {e}")
-            raise ModelLoadingError(
-                f"Failed to load summarization model '{self.model_name}': {e}",
-                model_name=self.model_name,
-                original_exception=e
-            )
+            raise ModelTrainingError(f"Failed to load summarization model: {str(e)}")
+    
     
     def summarize(
         self,
@@ -89,53 +59,46 @@ class TextSummarizer(LoggerMixin):
         num_beams: int = 4
     ) -> str:
         """
-        Generate a summary for the input text.
+        Generate summary for input text.
         
         Args:
-            text: Input text to summarize
-            max_input_length: Maximum input token length
-            max_summary_length: Maximum summary token length
-            min_summary_length: Minimum summary token length
-            num_beams: Number of beams for beam search
+            text (str): Input text to summarize
+            max_input_length (int): Maximum input length for tokenizer
+            max_summary_length (int): Maximum length of generated summary
+            min_summary_length (int): Minimum length of generated summary
+            num_beams (int): Number of beams for beam search
             
         Returns:
-            Generated summary text
+            str: Generated summary
             
         Raises:
-            ValidationError: If text is invalid or too short
-            SummarizationError: If summarization fails
+            ModelTrainingError: If summarization fails
         """
-        if not text or len(text.strip()) < 20:
-            self.log_warning(f"Text too short for summarization: {len(text)} chars")
-            raise ValidationError(
-                "Input text is too short (minimum 20 characters).",
-                field="text",
-                value=text[:50] if text else ""
-            )
-        
-        if self.model is None or self.tokenizer is None:
-            self.log_error("Model not loaded")
-            raise ModelLoadingError(
-                "Model not loaded. Call load_model() first.",
-                model_name=self.model_name
-            )
-        
         try:
-            self.log_debug(f"Summarizing text of length {len(text)}")
+            if not self.is_loaded:
+                raise ModelTrainingError("Model not loaded. Initialize first.")
             
-            # Truncate text to avoid memory issues
+            if not text or len(text.strip()) == 0:
+                raise ModelTrainingError("Input text is empty")
+            
+            # Truncate text to avoid too long input
             truncated_text = text[:1000]
             
             # Tokenize input
+            logger.info(f"Summarizing text of length {len(text)}")
+            
             inputs = self.tokenizer(
-                f"summarize: {truncated_text}",
+                "summarize: " + truncated_text,
                 return_tensors="pt",
                 max_length=max_input_length,
                 truncation=True
             )
             
-            # Move to device
-            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+            # Move inputs to device
+            inputs = {
+                k: v.to(self.device)
+                for k, v in inputs.items()
+            }
             
             # Generate summary
             with torch.no_grad():
@@ -153,42 +116,121 @@ class TextSummarizer(LoggerMixin):
                 skip_special_tokens=True
             )
             
-            self.log_info(f"Summarization completed. Summary length: {len(summary)}")
+            logger.info(f"Summary generated. Length: {len(summary)}")
             return summary
+            
         except Exception as e:
-            self.log_error(f"Summarization failed: {e}")
-            raise SummarizationError(
-                f"Summarization failed: {e}",
-                original_exception=e
-            )
+            raise ModelTrainingError(f"Summarization failed: {str(e)}")
+    
     
     def summarize_batch(
         self,
         texts: list,
         max_input_length: int = 512,
         max_summary_length: int = 130,
-        min_summary_length: int = 40
+        min_summary_length: int = 40,
+        num_beams: int = 4
     ) -> list:
         """
-        Summarize multiple texts.
+        Generate summaries for a batch of texts.
         
         Args:
-            texts: List of texts to summarize
-            max_input_length: Maximum input token length
-            max_summary_length: Maximum summary token length
-            min_summary_length: Minimum summary token length
+            texts (list): List of input texts
+            max_input_length (int): Maximum input length
+            max_summary_length (int): Maximum summary length
+            min_summary_length (int): Minimum summary length
+            num_beams (int): Number of beams for beam search
             
         Returns:
-            List of summaries
+            list: List of summaries
         """
-        summaries = []
-        for text in texts:
-            summary = self.summarize(
-                text,
-                max_input_length=max_input_length,
-                max_summary_length=max_summary_length,
-                min_summary_length=min_summary_length
-            )
-            summaries.append(summary)
+        try:
+            logger.info(f"Summarizing batch of {len(texts)} texts")
+            
+            summaries = [
+                self.summarize(
+                    text,
+                    max_input_length,
+                    max_summary_length,
+                    min_summary_length,
+                    num_beams
+                )
+                for text in texts
+            ]
+            
+            logger.info(f"Batch summarization completed")
+            return summaries
+            
+        except Exception as e:
+            raise ModelTrainingError(f"Batch summarization failed: {str(e)}")
+    
+    
+    def get_model_info(self) -> Dict:
+        """
+        Get information about loaded model.
         
-        return summaries
+        Returns:
+            dict: Model information
+        """
+        return {
+            "model_name": self.model_name,
+            "device": str(self.device),
+            "is_loaded": self.is_loaded,
+            "model_type": type(self.model).__name__,
+            "tokenizer_type": type(self.tokenizer).__name__
+        }
+
+
+class SummarizationPipeline:
+    """
+    Complete summarization pipeline for dataframes.
+    """
+    
+    def __init__(self, model_name: str = "t5-small"):
+        """
+        Initialize summarization pipeline.
+        
+        Args:
+            model_name (str): Name of T5 model
+        """
+        self.summarizer = TextSummarizer(model_name)
+        logger.info("SummarizationPipeline initialized")
+    
+    
+    def summarize_dataframe(
+        self,
+        df,
+        text_column: str = 'text',
+        output_column: str = 'summary',
+        **summarize_kwargs
+    ):
+        """
+        Add summaries to dataframe.
+        
+        Args:
+            df: Input dataframe
+            text_column (str): Name of text column
+            output_column (str): Name of output summary column
+            **summarize_kwargs: Additional arguments for summarize()
+            
+        Returns:
+            DataFrame with added summary column
+        """
+        import pandas as pd
+        
+        try:
+            if text_column not in df.columns:
+                raise ModelTrainingError(f"Column '{text_column}' not found")
+            
+            logger.info(f"Summarizing {len(df)} documents")
+            
+            df_result = df.copy()
+            df_result[output_column] = df_result[text_column].apply(
+                lambda text: self.summarizer.summarize(text, **summarize_kwargs)
+            )
+            
+            logger.info("Dataframe summarization completed")
+            return df_result
+            
+        except Exception as e:
+            raise ModelTrainingError(f"Dataframe summarization failed: {str(e)}")
