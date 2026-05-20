@@ -70,6 +70,26 @@ Intelligent-Document-Understanding/
 │   ├── 05_summarization.ipynb
 │   └── 06_integration_testing.ipynb
 │
+├── src/                          # Core NLP pipeline
+│   │
+│   ├── components/              # Reusable NLP components
+│   │   ├── __init__.py
+│   │   ├── data_ingestion.py
+│   │   ├── data_transformation.py
+│   │   ├── feature_engineering.py
+│   │   ├── model_trainer.py
+│   │   ├── model_evaluation.py
+│   │   └── summarization.py
+│   │
+│   ├── pipeline/                # Training & inference pipelines
+│   │   ├── __init__.py
+│   │   ├── training_pipeline.py
+│   │   └── prediction_pipeline.py
+│   │
+│   ├── __init__.py
+│   ├── exception.py
+│   ├── logger.py
+│   └── utils.py
 ├── streamlit_app.py
 ├── requirements.txt
 ├── README.md
