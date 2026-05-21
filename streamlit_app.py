@@ -12,6 +12,7 @@ import pdfplumber
 import pandas as pd
 import re
 import json
+import os
 from datetime import datetime
 import time
 
@@ -81,7 +82,7 @@ st.markdown("---")
 # API CONFIGURATION
 # ============================================================================
 
-API_BASE_URL = "http://127.0.0.1:8000"
+API_BASE_URL = os.environ.get("BACKEND_API_URL", "http://127.0.0.1:8000")
 API_ANALYZE_URL = f"{API_BASE_URL}/analyze"
 API_HEALTH_URL = f"{API_BASE_URL}/health"
 

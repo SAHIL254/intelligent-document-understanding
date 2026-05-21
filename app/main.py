@@ -14,6 +14,7 @@ import logging
 from datetime import datetime
 import joblib
 import spacy
+import os
 
 from src.logger import get_logger
 from src.pipeline import NLPInferencePipeline, PredictionPipeline
@@ -538,10 +539,13 @@ async def general_exception_handler(request, exc):
 if __name__ == "__main__":
     import uvicorn
     
+    # Pull dynamic web port allocated dynamically by Render's environment router.
+    # Defaults safely back to local loop container '8000'.
+    port = int(os.environ.get("PORT", 8000))
+    
     uvicorn.run(
-        "app.main:app",
+        "main:app",
         host="0.0.0.0",
-        port=8000,
-        reload=True,
-        log_level="info"
+        port=port,
+        reload=False if os.environ.get("PORT") else True
     )
