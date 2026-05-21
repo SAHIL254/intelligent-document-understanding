@@ -12,7 +12,7 @@ scikit-learn==1.8.0
 joblib==1.5.3
 
 spacy==3.8.11
-en_core_web_sm==3.8.0
+https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
 
 transformers==4.57.3
 torch
