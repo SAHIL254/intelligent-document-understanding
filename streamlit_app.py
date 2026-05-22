@@ -116,7 +116,8 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("🔌 API Status")
 
 try:
-    health_response = requests.get(API_HEALTH_URL, timeout=5)
+    # Changed from 5 to 15 to account for Render Free Tier spin-up latency
+    health_response = requests.get(API_HEALTH_URL, timeout=15) 
     if health_response.status_code == 200:
         health_data = health_response.json()
         if health_data.get("status") == "healthy" or health_data.get("models_initialized"):
