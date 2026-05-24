@@ -1,24 +1,28 @@
-# 📄 Intelligent Document Understanding (IDU) – NLP System
+# 📄 Intelligent Document Understanding (IDU) — NLP
 
-An **end-to-end NLP application** that analyzes unstructured documents using **Machine Learning and Deep Learning models**, providing:
+An end-to-end NLP application that processes unstructured documents to provide:
 
-* 📌 Document Classification
-* 🧠 Named Entity Recognition (NER)
-* ✂️ Abstractive Text Summarization
+- Document classification
+- Named Entity Recognition (NER)
+- Abstractive text summarization
 
-Built with **FastAPI (backend)**, **Streamlit (frontend)**, **spaCy**, and **HuggingFace Transformers**, optimized for **CPU-only execution**.
+The project demonstrates an integrated ML workflow with a FastAPI backend and a Streamlit frontend, using spaCy and HuggingFace Transformers. It is designed to run on CPU-only systems.
 
 ---
 
-## 🚀 Key Features
+**Project Goal**: Build a modular, reproducible pipeline for extracting structure and concise summaries from documents, suitable for experimentation and demonstration of production-oriented NLP components.
 
-* 🔍 Predicts document category (Business, Tech, Sports, etc.)
-* 🧠 Extracts named entities (ORG, GPE, DATE, etc.)
-* ✂️ Generates abstractive summaries using Transformer models
-* 🌐 REST API using FastAPI
-* 🖥️ Interactive UI using Streamlit
-* 📄 Supports **text input and file upload (TXT, PDF)**
-* 🧪 Modular notebooks for training, evaluation, and integration
+---
+
+## Key Features
+
+- Predict document category (e.g., Business, Tech, Sports)
+- Extract entities (ORG, GPE, DATE, PERSON, etc.) using spaCy
+- Produce abstractive summaries with Transformer models (HuggingFace)
+- Expose functionality via a REST API (FastAPI)
+- Interactive Streamlit UI for upload, preview, and results
+- Supports text paste and file upload (TXT, PDF)
+- Notebooks for data exploration, training, and evaluation
 
 ---
 
@@ -32,17 +36,59 @@ Below screenshots demonstrate the working Streamlit-based Intelligent Document U
 - Performs document classification
 - Extracts named entities (NER)
 - Generates an automatic summary
+- RAW JSON response
 - Copy and Download the summary
 
-![Streamlit UI](assets/streamlit_ui_1.png)
-![Streamlit UI](assets/streamlit_ui_2.png)
+![Streamlit UI](assets/1_streamlit_ui.png)
+![Streamlit UI](assets/1_streamlit_ui.png)
+![Streamlit UI](assets/3_streamlit_ui.png)
 [See Download Summary](assets/summary.txt)
-
-
 
 ---
 
-## 🗂️ Project Structure
+## Quick Start
+
+1. Create and activate a virtual environment:
+
+```bash
+python -m venv venv
+# Windows
+venv\Scripts\activate
+# macOS / Linux
+source venv/bin/activate
+```
+
+2. Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+3. Download the spaCy English model:
+
+```bash
+python -m spacy download en_core_web_sm
+```
+
+4. Run the backend (FastAPI):
+
+```bash
+uvicorn app.main:app --reload
+```
+
+5. Run the frontend (Streamlit):
+
+```bash
+streamlit run streamlit_app.py
+```
+
+Backend default URL: http://127.0.0.1:8000
+
+Streamlit UI default URL: http://localhost:8501
+
+---
+
+## Project Structure 
 
 ```
 Intelligent-Document-Understanding/
@@ -51,9 +97,10 @@ Intelligent-Document-Understanding/
 │   └── main.py
 │
 ├── assets/
-│   ├── streamlit_input.png
-│   ├── streamlit_results.png
-│   └── summary.txt
+│   ├── 1_streamlit_ui.png
+│   ├── 2_streamlit_ui.png
+│   ├── 3_streamlit_ui.png
+│   └── IDU_summary.txt
 │
 ├── data/
 │   └── bbc-news-data.csv
@@ -97,6 +144,8 @@ Intelligent-Document-Understanding/
 
 ```
 
+Refer to the `src/` and `notebooks/` folders for implementation details and experiments.
+
 ---
 
 ## 🔄 System Workflow
@@ -117,147 +166,49 @@ API Response → Streamlit UI
 
 ---
 
-## 🧪 Datasets Used
+## Models and Data
 
-* **BBC News Dataset**
-
-  * Used for document classification
-  * Categories: Business, Politics, Tech, Sports, Entertainment
-
-> NER is performed using **spaCy pre-trained models**
-> Summarization uses **HuggingFace transformer models**
+- Classification: TF-IDF + Logistic Regression (training notebooks included)
+- NER: spaCy `en_core_web_sm` 
+- Summarization: T5-based model (HuggingFace; CPU-optimized weights stored under `models/`)
+- Dataset: BBC News dataset used for classification experiments
 
 ---
 
-## ⚙️ Installation & Setup
+## Evaluation
 
-### 1️⃣ Create virtual environment
-
-```bash
-python -m venv venv
-```
-
-Activate it:
-
-```bash
-# Windows
-venv\Scripts\activate
-
-# Linux / Mac
-source venv/bin/activate
-```
+- Classification: accuracy, precision, recall, F1
+- NER: qualitative inspection and spot checks
+- Summarization: ROUGE (automated) and human evaluation for coherence and faithfulness
 
 ---
 
-### 2️⃣ Install dependencies
+## Development notes
 
-```bash
-pip install -r requirements.txt
-```
+- The codebase is modular to allow replacing models or components.
+- Notebooks provide step-by-step experiments used to produce the artifacts in `models/` and `artifacts/`.
 
-Download spaCy model:
-
-```bash
-python -m spacy download en_core_web_sm
-```
-
----
-
-## ▶️ Running the Application
-
-### 🔹 Terminal 1 — Start FastAPI backend
-
-```bash
-uvicorn app.main:app --reload
-```
-
-Backend runs at:
-
-```
-http://127.0.0.1:8000
-```
-
----
-
-### 🔹 Terminal 2 — Start Streamlit frontend
-
-```bash
-streamlit run streamlit_app.py
-```
-
-UI opens at:
-
-```
-http://localhost:8501
-```
-
----
-
-## 🖥️ Application Capabilities
-
-### ✔ Input Methods
-
-* Paste raw text
-* Upload `.txt` or `.pdf` files
-
-### ✔ Output
-
-* 🏷️ Predicted document category
-* 🧠 Extracted named entities
-* ✂️ Generated abstractive summary
-
----
-
-## 🧠 Models Used
-
-| Task           | Model                                |
-| -------------- | ------------------------------------ |
-| Classification | TF-IDF + Logistic Regression         |
-| NER            | spaCy `en_core_web_sm`               |
-| Summarization  | T5-small (CPU-optimized Transformer) |
-
----
-
-## 📊 Evaluation Strategy
-
-* **Classification**: Accuracy, Precision, Recall, F1-score
-* **NER**: Qualitative inspection of extracted entities
-* **Summarization**: Human qualitative evaluation
-  *(coherence, coverage, factual consistency)*
-
-> This mirrors **real-world industry evaluation practices** for NLP systems.
-
----
-
-## 🧩 Why This Project Matters
-
-✔ Demonstrates **end-to-end ML system design**
-✔ Covers **NLP + APIs + UI integration**
-✔ Modular, production-oriented architecture
-✔ Resume-ready project for **ML Engineer / NLP Engineer roles**
+If you plan to retrain models or run heavy experiments, consider using a machine with a GPU and updating `requirements.txt` accordingly.
 
 ---
 
 ## 🔮 Future Enhancements
 
-* Docker containerization
-* CI/CD using GitHub Actions
-* Cloud deployment (AWS / GCP / Azure)
-* Model monitoring & logging
-* Authentication & rate limiting
+- Docker containerization
+- CI/CD using GitHub Actions
+- Cloud deployment (AWS / GCP / Azure)
+- Model monitoring & logging
+- Authentication & rate limiting
 
 ---
 
-## 👤 Author
+## Author
 
-**Sahil Dervankar**
-B.Tech CSE(AI ML) | Aspiring ML / NLP Engineer
+Sahil Dervankar — Aspiring ML / NLP Engineer
 
 ---
 
 ## ⭐ If you like this project
 
 Give it a ⭐ on GitHub — it really helps!
-
----
 
